@@ -174,12 +174,12 @@ def main():
         layout="wide"
     )
 
-    # 自定义 CSS：去除竖线、美化筛选区
+    # 自定义 CSS：统计卡片彩色、自定义HTML表格（无竖线+颜色）
     st.markdown("""
     <style>
     /* 筛选区域背景色 */
     .filter-container {
-        background-color: #f0f2f6;
+        background-color: #f7f8fa;
         padding: 14px 20px;
         border-radius: 8px;
         margin-bottom: 10px;
@@ -196,15 +196,107 @@ def main():
     .stSelectbox select {
         border-radius: 6px;
     }
-    /* 指标卡片下方分隔线 */
-    hr {
-        border: none;
-        border-top: 1px solid #e0e0e0;
-        margin: 1rem 0;
-    }
     /* 隐藏 Streamlit 默认 divider */
     .st-emotion-cache-1aj19jr {
         display: none;
+    }
+    section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+    /* ===== 彩色统计卡片 ===== */
+    .stat-card {
+        background: #ffffff;
+        border: 1px solid #eef0f3;
+        border-radius: 10px;
+        padding: 16px 20px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stat-card:hover {
+        box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    }
+    .stat-label {
+        font-size: 13px;
+        color: #8a8f99;
+        margin-bottom: 6px;
+        font-weight: 500;
+    }
+    .stat-value-green {
+        font-size: 30px;
+        font-weight: 700;
+        color: #00b578;
+        line-height: 1.1;
+    }
+    .stat-value-blue {
+        font-size: 30px;
+        font-weight: 700;
+        color: #1677ff;
+        line-height: 1.1;
+    }
+    .stat-value-orange {
+        font-size: 30px;
+        font-weight: 700;
+        color: #ff8800;
+        line-height: 1.1;
+    }
+    .stat-value-gray {
+        font-size: 30px;
+        font-weight: 700;
+        color: #4e5969;
+        line-height: 1.1;
+    }
+    /* ===== 自定义订单表格 ===== */
+    .order-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        color: #1d2129;
+    }
+    .order-table thead th {
+        background-color: #f7f8fa;
+        font-weight: 600;
+        color: #4e5969;
+        padding: 10px 14px;
+        text-align: left;
+        border: none;
+        border-bottom: 1px solid #e5e6eb;
+        border-top: 1px solid #e5e6eb;
+    }
+    .order-table tbody td {
+        padding: 11px 14px;
+        border: none;
+        border-bottom: 1px solid #f0f1f3;
+        vertical-align: middle;
+    }
+    .order-table tbody tr:hover td {
+        background-color: #fafbfc;
+    }
+    /* 状态胶囊 */
+    .status-tag-active {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        background-color: #e8ffea;
+        color: #00b578;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    /* 合作价格（高亮色） */
+    .price-cell {
+        color: #ff7d00;
+        font-weight: 600;
+    }
+    /* 备注列溢出省略 */
+    .note-cell {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: inline-block;
+        width: 100%;
+    }
+    .note-cell:hover {
+        white-space: normal;
+        overflow: visible;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -247,18 +339,31 @@ def main():
                 st.write(f"API 测试: {test_data}")
         return
 
-    # 统计卡片
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("在投订单数", len(df))
-    with col2:
-        products = df['产品'].dropna().nunique() if '产品' in df.columns else 0
-        st.metric("产品数", products)
-    with col3:
-        advertisers = df['广告主'].dropna().nunique() if '广告主' in df.columns else 0
-        st.metric("广告主数", advertisers)
-    with col4:
-        st.metric("数据更新时间", datetime.now().strftime("%H:%M:%S"))
+    # 统计卡片（自定义彩色圆角卡片）
+    products_count = df['产品'].dropna().nunique() if '产品' in df.columns else 0
+    advertisers_count = df['广告主'].dropna().nunique() if '广告主' in df.columns else 0
+    update_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    st.markdown(f"""
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div class="stat-card">
+            <div class="stat-label">在投订单数</div>
+            <div class="stat-value-green">{len(df)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">产品数</div>
+            <div class="stat-value-blue">{products_count}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">广告主数</div>
+            <div class="stat-value-orange">{advertisers_count}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">更新时间</div>
+            <div class="stat-value-gray" style="font-size:22px;">{update_time}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # 筛选区（9 个筛选项，同一行显示）
     st.markdown('<div class="filter-container">', unsafe_allow_html=True)
@@ -335,56 +440,64 @@ def main():
     display_df = filtered_df[display_cols] if not filtered_df.empty else filtered_df
 
     if not display_df.empty:
-        # 配置列宽和样式，表格加高，支持点击行选中
-        event = st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            height=800,
-            selection_mode="single-row",
-            column_config={
-                "考核备注": st.column_config.TextColumn(width="large"),
-                "其他备注": st.column_config.TextColumn(width="large"),
-                "包名": st.column_config.TextColumn(width="medium"),
-                "配置号": st.column_config.TextColumn(width="medium"),
-            }
-        )
+        # ===== 用自定义 HTML 表格渲染（无竖线、有颜色、整洁）=====
+        def escape_html(s):
+            return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if s is not None else ""
 
-        # 点击行显示完整备注
-        selected = event.selected_rows
-        if selected is not None:
-            if hasattr(selected, 'empty'):
-                if not selected.empty:
-                    st.markdown("**📌 行详情**")
-                    row = selected.iloc[0]
-                    detail_cols = st.columns(2)
-                    with detail_cols[0]:
-                        for col in display_cols[:len(display_cols)//2]:
-                            val = row.get(col, "")
-                            if val:
-                                st.markdown(f"**{col}**: {val}")
-                    with detail_cols[1]:
-                        for col in display_cols[len(display_cols)//2:]:
-                            val = row.get(col, "")
-                            if val:
-                                st.markdown(f"**{col}**: {val}")
-            elif hasattr(selected, '__len__'):
-                if len(selected) > 0:
-                    st.markdown("**📌 行详情**")
-                    sel_df = display_df.iloc[list(selected)] if len(selected) > 0 else None
-                    if sel_df is not None and not sel_df.empty:
-                        row = sel_df.iloc[0]
-                        detail_cols = st.columns(2)
-                        with detail_cols[0]:
-                            for col in display_cols[:len(display_cols)//2]:
-                                val = row.get(col, "")
-                                if val:
-                                    st.markdown(f"**{col}**: {val}")
-                        with detail_cols[1]:
-                            for col in display_cols[len(display_cols)//2:]:
-                                val = row.get(col, "")
-                                if val:
-                                    st.markdown(f"**{col}**: {val}")
+        # 构建表头
+        thead_html = "<thead><tr>"
+        for col in display_cols:
+            thead_html += f"<th>{escape_html(col)}</th>"
+        thead_html += "</tr></thead>"
+
+        # 构建表体
+        tbody_html = "<tbody>"
+        note_cols = {"考核备注", "其他备注"}
+        price_cols = {"合作价格"}
+        status_cols = {"上下线状态"}
+
+        for _, row in display_df.iterrows():
+            tbody_html += "<tr>"
+            for col in display_cols:
+                raw_val = row.get(col, "")
+                val = escape_html(raw_val) if raw_val is not None else ""
+                cell_content = val
+                css_class = ""
+
+                if col in price_cols and val:
+                    # 合作价格：橙色加粗
+                    try:
+                        float(val)
+                        cell_content = f'<span class="price-cell">{val}</span>'
+                    except ValueError:
+                        pass
+                elif col in status_cols:
+                    # 状态：绿色胶囊
+                    if val == "在投":
+                        cell_content = f'<span class="status-tag-active">{val}</span>'
+                elif col in note_cols:
+                    # 备注列：超长省略，hover显示
+                    if val:
+                        cell_content = f'<span class="note-cell" title="{val}">{val}</span>'
+                    else:
+                        cell_content = ""
+
+                tbody_html += f'<td class="{css_class}">{cell_content}</td>'
+            tbody_html += "</tr>"
+        tbody_html += "</tbody>"
+
+        table_html = f'<table class="order-table">{thead_html}{tbody_html}</table>'
+
+        # 用 components.html 渲染表格，设置足够高度以滚动
+        components.html(
+            f"""
+            <div style="max-height:800px;overflow-y:auto;padding-right:8px;">
+                {table_html}
+            </div>
+            """,
+            height=820,
+            scrolling=True
+        )
 
         # 下载按钮
         csv = display_df.to_csv(index=False).encode('utf-8-sig')
