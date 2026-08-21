@@ -244,31 +244,38 @@ def main():
         color: #4e5969;
         line-height: 1.1;
     }
-    /* ===== 自定义订单表格 ===== */
+    /* ===== 自定义订单表格（仅横线，无竖线） ===== */
     .order-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 13.5px;
         color: #1d2129;
+        background-color: #ffffff;
     }
     .order-table thead th {
-        background-color: #f7f8fa;
+        background-color: #ffffff;
         font-weight: 600;
         color: #4e5969;
-        padding: 10px 14px;
+        padding: 8px 12px;
         text-align: left;
         border: none;
         border-bottom: 1px solid #e5e6eb;
-        border-top: 1px solid #e5e6eb;
+        position: sticky;
+        top: 0;
+        z-index: 1;
     }
     .order-table tbody td {
-        padding: 11px 14px;
+        padding: 9px 12px;
         border: none;
         border-bottom: 1px solid #f0f1f3;
         vertical-align: middle;
     }
+    .order-table tbody tr:last-child td {
+        border-bottom: none;
+    }
     .order-table tbody tr:hover td {
-        background-color: #fafbfc;
+        background-color: #f7f8fa;
     }
     /* 状态胶囊 */
     .status-tag-active {
