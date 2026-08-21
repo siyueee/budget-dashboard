@@ -10,6 +10,7 @@ import base64
 import os
 from datetime import datetime, timedelta
 import pandas as pd
+import streamlit.components.v1 as components
 
 # ===== 飞书应用凭证（从环境变量或 Streamlit secrets 读取）=====
 try:
@@ -80,6 +81,16 @@ def excel_serial_to_date(val):
         return dt.strftime("%Y-%m-%d")
     except (ValueError, TypeError):
         return str(val)
+
+@st.cache_data(show_spinner=False)
+def load_gif_base64(filename):
+    """读取 GIF 文件并返回 base64 编码（缓存结果）"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", filename)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    return None
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_active_orders():
@@ -184,13 +195,18 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # 标题（带小熊图标）
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "bear.gif")
-    col_title, col_text = st.columns([1, 20])
-    with col_title:
-        if os.path.exists(icon_path):
-            st.image(icon_path, width=50)
-    with col_text:
+    # 标题（带小熊动图）
+    bear_b64 = load_gif_base64("bear.gif")
+    if bear_b64:
+        col_img, col_txt = st.columns([1, 15])
+        with col_img:
+            components.html(
+                f'<img src="data:image/gif;base64,{bear_b64}" style="width:50px;height:auto;border-radius:8px;">',
+                height=60
+            )
+        with col_txt:
+            st.markdown("# 订单披露")
+    else:
         st.markdown("# 订单披露")
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
@@ -287,12 +303,17 @@ def main():
 
     # 数据表格
     # 在投订单明细标题（带动图）
-    table_icon_path = os.path.join(os.path.dirname(__file__), "assets", "table_icon.gif")
-    col_icon, col_header = st.columns([1, 30])
-    with col_icon:
-        if os.path.exists(table_icon_path):
-            st.image(table_icon_path, width=35)
-    with col_header:
+    table_b64 = load_gif_base64("table_icon.gif")
+    if table_b64:
+        col_img2, col_txt2 = st.columns([1, 25])
+        with col_img2:
+            components.html(
+                f'<img src="data:image/gif;base64,{table_b64}" style="width:35px;height:auto;">',
+                height=45
+            )
+        with col_txt2:
+            st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）")
+    else:
         st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）")
 
     # 选择要显示的列（移除不需要展示的列）
