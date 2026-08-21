@@ -286,7 +286,14 @@ def main():
     st.markdown('</div>', unsafe_allow_html=True)
 
     # 数据表格
-    st.subheader(f"📋 在投订单明细（{len(filtered_df)} 条）")
+    # 在投订单明细标题（带动图）
+    table_icon_path = os.path.join(os.path.dirname(__file__), "assets", "table_icon.gif")
+    table_icon_img = ""
+    if os.path.exists(table_icon_path):
+        with open(table_icon_path, "rb") as f:
+            table_icon_b64 = base64.b64encode(f.read()).decode()
+        table_icon_img = f'<img src="data:image/gif;base64,{table_icon_b64}" width="30" style="vertical-align:middle;margin-right:6px;">'
+    st.markdown(f"### {table_icon_img}在投订单明细（{len(filtered_df)} 条）")
 
     # 选择要显示的列（移除不需要展示的列）
     display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '考核', '考核数值', '广告主', '渠道号', '下载链接', '是否打满', '是否披露']]
