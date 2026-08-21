@@ -10,8 +10,13 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 # ===== 飞书应用凭证（从环境变量或 Streamlit secrets 读取）=====
-APP_ID = st.secrets.get("FEISHU_APP_ID", "") or __import__("os").environ.get("FEISHU_APP_ID", "")
-APP_SECRET = st.secrets.get("FEISHU_APP_SECRET", "") or __import__("os").environ.get("FEISHU_APP_SECRET", "")
+import os
+try:
+    APP_ID = st.secrets["FEISHU_APP_ID"]
+    APP_SECRET = st.secrets["FEISHU_APP_SECRET"]
+except Exception:
+    APP_ID = os.environ.get("FEISHU_APP_ID", "")
+    APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 
 # ===== 电子表格配置 =====
 SPREADSHEET_TOKEN = "RsPys96vjhOATftKC7mcj5UGn4c"
@@ -20,10 +25,10 @@ MATCH_SHEET_ID = "bPtGPo"    # 包名匹配
 TOTAL_ROWS = 631
 MATCH_TOTAL_ROWS = 628
 
-# ===== 表头定义 =====
-HEADERS = ['配置号', '广告主', '包名', '接口文档', '产品', '渠道号', '合作价格',
-           '需求量级', '上线时间', '下线时间', '上下线状态', '回传维度', '考核',
-           '考核数值', 'RTA', '考核备注', '其他备注', '下载链接', '归属', '是否披露']
+# ===== 表头定义（与电子表格实际列顺序一致）=====
+HEADERS = ['预算源', '任务类型', '配置号', '广告主', '包名', '接口文档', '产品',
+           '渠道号', '合作价格', '需求量级', '上线时间', '下线时间', '上下线状态',
+           '回传维度', '考核', '考核数值', 'RTA', '考核备注', '其他备注', '下载链接']
 
 # ===== Token 缓存 =====
 _token_cache = {"token": None, "expire": 0}
@@ -102,11 +107,11 @@ def fetch_active_orders():
                 pkg_map[str(r[0]).strip()] = str(r[1]).strip()
         row = end + 1
 
-    STATUS_COL = 10
-    PRODUCT_COL = 4
-    PACKAGE_COL = 2
-    ONLINE_TIME_COL = 8
-    OFFLINE_TIME_COL = 9
+    STATUS_COL = 12     # 上下线状态
+    PRODUCT_COL = 6     # 产品
+    PACKAGE_COL = 4     # 包名
+    ONLINE_TIME_COL = 10
+    OFFLINE_TIME_COL = 11
 
     active_orders = []
     for r in data_rows:
@@ -144,12 +149,27 @@ def main():
     st.title("📊 订单披露")
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
+    # 检查凭证
+    if not APP_ID or not APP_SECRET:
+        st.error("⚠️ 未配置飞书应用凭证！请在 `.streamlit/secrets.toml` 中设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
+        st.code('FEISHU_APP_ID = "your_app_id"\nFEISHU_APP_SECRET = "your_app_secret"', language="toml")
+        return
+
     # 读取数据
     with st.spinner("正在从飞书读取最新数据..."):
         df = fetch_active_orders()
 
     if df.empty:
         st.warning("未读取到在投订单数据")
+        # 调试信息
+        with st.expander("查看调试信息"):
+            token = get_tenant_access_token()
+            st.write(f"APP_ID: {APP_ID[:10]}..." if APP_ID else "APP_ID: 未设置")
+            st.write(f"Token 获取: {'成功' if token else '失败'}")
+            if token:
+                test_data = feishu_get(f"/sheets/v2/spreadsheets/{SPREADSHEET_TOKEN}/values/{SHEET_ID}!A1:T2",
+                                       params={"valueRenderOption": "ToString"})
+                st.write(f"API 测试: {test_data}")
         return
 
     # 统计卡片
@@ -180,8 +200,8 @@ def main():
         api_doc_options = ['全部'] + sorted([str(x) for x in df['接口文档'].dropna().unique()]) if '接口文档' in df.columns else ['全部']
         api_doc_filter = st.selectbox("接口文档", api_doc_options)
     with col_d:
-        attribution_options = ['全部'] + sorted([str(x) for x in df['归属'].dropna().unique()]) if '归属' in df.columns else ['全部']
-        attribution_filter = st.selectbox("归属", attribution_options)
+        source_options = ['全部'] + sorted([str(x) for x in df['预算源'].dropna().unique()]) if '预算源' in df.columns else ['全部']
+        attribution_filter = st.selectbox("预算源", source_options)
 
     col_e, col_f, col_g = st.columns(3)
     with col_e:
@@ -203,7 +223,7 @@ def main():
     if api_doc_filter != '全部':
         filtered_df = filtered_df[filtered_df['接口文档'].astype(str) == api_doc_filter]
     if attribution_filter != '全部':
-        filtered_df = filtered_df[filtered_df['归属'].astype(str) == attribution_filter]
+        filtered_df = filtered_df[filtered_df['预算源'].astype(str) == attribution_filter]
     if rta_filter != '全部':
         filtered_df = filtered_df[filtered_df['RTA'].astype(str) == rta_filter]
     if callback_filter != '全部':
@@ -217,7 +237,7 @@ def main():
     st.subheader(f"📋 在投订单明细（{len(filtered_df)} 条）")
 
     # 选择要显示的列（移除不需要展示的列）
-    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间']]
+    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '预算源', '任务类型']]
     display_df = filtered_df[display_cols] if not filtered_df.empty else filtered_df
 
     if not display_df.empty:
