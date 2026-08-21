@@ -71,6 +71,16 @@ def read_sheet_range(sheet_id, start_row, end_row, col_start="A", col_end="X"):
         return []
     return data.get("data", {}).get("valueRange", {}).get("values", [])
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_sheet_row_count(sheet_id):
+    """动态获取工作表的实际行数"""
+    path = f"/sheets/v3/spreadsheets/{SPREADSHEET_TOKEN}/sheets/{sheet_id}"
+    data = feishu_get(path)
+    if data and data.get("code") == 0:
+        props = data.get("data", {}).get("sheet", {}).get("grid_properties", {})
+        return props.get("rowCount", 1000)
+    return 1000
+
 def excel_serial_to_date(val):
     """Excel 序列号转日期"""
     if val is None or val == "":
@@ -95,11 +105,15 @@ def load_gif_base64(filename):
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_active_orders():
     """从飞书电子表格读取在投订单（5分钟缓存）"""
+    # 动态获取实际行数，避免数据被截断
+    total_rows = get_sheet_row_count(SHEET_ID)
+    match_rows = get_sheet_row_count(MATCH_SHEET_ID)
+
     all_rows = []
     row = 1
     batch_size = 100
-    while row <= TOTAL_ROWS:
-        end = min(row + batch_size - 1, TOTAL_ROWS)
+    while row <= total_rows:
+        end = min(row + batch_size - 1, total_rows)
         batch = read_sheet_range(SHEET_ID, row, end)
         all_rows.extend(batch)
         row = end + 1
@@ -112,8 +126,8 @@ def fetch_active_orders():
     # 构建包名匹配表
     pkg_map = {}
     row = 1
-    while row <= MATCH_TOTAL_ROWS:
-        end = min(row + batch_size - 1, MATCH_TOTAL_ROWS)
+    while row <= match_rows:
+        end = min(row + batch_size - 1, match_rows)
         batch = read_sheet_range(MATCH_SHEET_ID, row, end, "A", "B")
         for r in batch[1:] if row == 1 else batch:
             if len(r) >= 2 and r[0] and r[1]:
