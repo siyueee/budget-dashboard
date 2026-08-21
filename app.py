@@ -186,12 +186,12 @@ def main():
 
     # 标题（带小熊图标）
     icon_path = os.path.join(os.path.dirname(__file__), "assets", "bear.gif")
-    icon_img = ""
-    if os.path.exists(icon_path):
-        with open(icon_path, "rb") as f:
-            icon_b64 = base64.b64encode(f.read()).decode()
-        icon_img = f'<img src="data:image/gif;base64,{icon_b64}" width="50" style="vertical-align:middle;margin-right:10px;border-radius:8px;">'
-    st.markdown(f"# {icon_img}订单披露", unsafe_allow_html=True)
+    col_title, col_text = st.columns([1, 20])
+    with col_title:
+        if os.path.exists(icon_path):
+            st.image(icon_path, width=50)
+    with col_text:
+        st.markdown("# 订单披露")
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
     # 检查凭证
@@ -288,12 +288,12 @@ def main():
     # 数据表格
     # 在投订单明细标题（带动图）
     table_icon_path = os.path.join(os.path.dirname(__file__), "assets", "table_icon.gif")
-    table_icon_img = ""
-    if os.path.exists(table_icon_path):
-        with open(table_icon_path, "rb") as f:
-            table_icon_b64 = base64.b64encode(f.read()).decode()
-        table_icon_img = f'<img src="data:image/gif;base64,{table_icon_b64}" width="30" style="vertical-align:middle;margin-right:6px;">'
-    st.markdown(f"### {table_icon_img}在投订单明细（{len(filtered_df)} 条）")
+    col_icon, col_header = st.columns([1, 30])
+    with col_icon:
+        if os.path.exists(table_icon_path):
+            st.image(table_icon_path, width=35)
+    with col_header:
+        st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）")
 
     # 选择要显示的列（移除不需要展示的列）
     display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '考核', '考核数值', '广告主', '渠道号', '下载链接', '是否打满', '是否披露']]
