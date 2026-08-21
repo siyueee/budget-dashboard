@@ -185,12 +185,12 @@ def main():
     """, unsafe_allow_html=True)
 
     # 标题（带小熊图标）
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "bear.jpg")
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "bear.gif")
     icon_img = ""
     if os.path.exists(icon_path):
         with open(icon_path, "rb") as f:
             icon_b64 = base64.b64encode(f.read()).decode()
-        icon_img = f'<img src="data:image/jpeg;base64,{icon_b64}" width="50" style="vertical-align:middle;margin-right:10px;border-radius:8px;">'
+        icon_img = f'<img src="data:image/gif;base64,{icon_b64}" width="50" style="vertical-align:middle;margin-right:10px;border-radius:8px;">'
     st.markdown(f"# {icon_img}订单披露", unsafe_allow_html=True)
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
