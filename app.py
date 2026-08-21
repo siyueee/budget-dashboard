@@ -189,35 +189,31 @@ def main():
 
     # 筛选区
     st.subheader("🔍 筛选")
-    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
 
     with col_a:
-        config_filter = st.text_input("配置号", placeholder="输入配置号搜索...")
+        config_options = ['全部'] + sorted([str(x) for x in df['配置号'].dropna().unique()]) if '配置号' in df.columns else ['全部']
+        config_filter = st.selectbox("配置号", config_options)
     with col_b:
-        product_options = ['全部'] + sorted([str(x) for x in df['产品'].dropna().unique()]) if '产品' in df.columns else ['全部']
-        product_filter = st.selectbox("产品", product_options)
-    with col_c:
         api_doc_options = ['全部'] + sorted([str(x) for x in df['接口文档'].dropna().unique()]) if '接口文档' in df.columns else ['全部']
         api_doc_filter = st.selectbox("接口文档", api_doc_options)
+    with col_c:
+        product_options = ['全部'] + sorted([str(x) for x in df['产品'].dropna().unique()]) if '产品' in df.columns else ['全部']
+        product_filter = st.selectbox("产品", product_options)
     with col_d:
-        source_options = ['全部'] + sorted([str(x) for x in df['预算源'].dropna().unique()]) if '预算源' in df.columns else ['全部']
-        attribution_filter = st.selectbox("预算源", source_options)
-
-    col_e, col_f, col_g = st.columns(3)
-    with col_e:
-        rta_options = ['全部'] + sorted([str(x) for x in df['RTA'].dropna().unique()]) if 'RTA' in df.columns else ['全部']
-        rta_filter = st.selectbox("RTA", rta_options)
-    with col_f:
         callback_options = ['全部'] + sorted([str(x) for x in df['回传维度'].dropna().unique()]) if '回传维度' in df.columns else ['全部']
         callback_filter = st.selectbox("回传维度", callback_options)
-    with col_g:
-        config_no_options = ['全部'] + sorted([str(x) for x in df['配置号'].dropna().unique()]) if '配置号' in df.columns else ['全部']
-        config_no_filter = st.selectbox("配置号筛选", config_no_options)
+    with col_e:
+        source_options = ['全部'] + sorted([str(x) for x in df['预算源'].dropna().unique()]) if '预算源' in df.columns else ['全部']
+        attribution_filter = st.selectbox("归属", source_options)
+    with col_f:
+        rta_options = ['全部'] + sorted([str(x) for x in df['RTA'].dropna().unique()]) if 'RTA' in df.columns else ['全部']
+        rta_filter = st.selectbox("RTA", rta_options)
 
     # 应用筛选
     filtered_df = df.copy()
-    if config_filter:
-        filtered_df = filtered_df[filtered_df['配置号'].astype(str).str.contains(config_filter, case=False, na=False)]
+    if config_filter != '全部':
+        filtered_df = filtered_df[filtered_df['配置号'].astype(str) == config_filter]
     if product_filter != '全部':
         filtered_df = filtered_df[filtered_df['产品'].astype(str) == product_filter]
     if api_doc_filter != '全部':
@@ -228,8 +224,6 @@ def main():
         filtered_df = filtered_df[filtered_df['RTA'].astype(str) == rta_filter]
     if callback_filter != '全部':
         filtered_df = filtered_df[filtered_df['回传维度'].astype(str) == callback_filter]
-    if config_no_filter != '全部':
-        filtered_df = filtered_df[filtered_df['配置号'].astype(str) == config_no_filter]
 
     st.divider()
 
@@ -237,7 +231,7 @@ def main():
     st.subheader(f"📋 在投订单明细（{len(filtered_df)} 条）")
 
     # 选择要显示的列（移除不需要展示的列）
-    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '预算源', '任务类型']]
+    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '预算源', '任务类型', '考核', '考核数值', '广告主', '渠道号', '下载链接']]
     display_df = filtered_df[display_cols] if not filtered_df.empty else filtered_df
 
     if not display_df.empty:
