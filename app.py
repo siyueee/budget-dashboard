@@ -119,7 +119,18 @@ def fetch_active_orders():
         row = end + 1
 
     if not all_rows:
-        return pd.DataFrame()
+        return pd.DataFrame(), datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+
+    actual_head = [str(x).strip() if x is not None else "" for x in (all_rows[0] if all_rows else [])]
+    # 根据 HEADERS 与实际表头行做精确匹配 → 得到每个列名在原始数据中的 index（鲁棒：飞书列顺序 / 加删列不再崩）
+    col_idx = {}
+    for h in HEADERS:
+        h_s = str(h).strip()
+        for i, hh in enumerate(actual_head):
+            if hh == h_s:
+                col_idx[h] = i
+                break
+    # 未匹配的列会缺失 col_idx，后续所有取列都用 .get(col, None) 做保护
 
     data_rows = all_rows[1:]
 
@@ -137,41 +148,70 @@ def fetch_active_orders():
                 attr_map[str(r[0]).strip()] = str(r[2]).strip()
         row = end + 1
 
-    STATUS_COL = 13     # 上下线状态
-    DISCLOSE_COL = 22   # 是否披露
-    PRODUCT_COL = 7     # 产品
-    PACKAGE_COL = 5     # 包名
-    ATTR_COL = 20       # 归属
-    ONLINE_TIME_COL = 11
-    OFFLINE_TIME_COL = 12
+    STATUS_COL    = col_idx.get("上下线状态")
+    DISCLOSE_COL  = col_idx.get("是否披露")
+    PRODUCT_COL   = col_idx.get("产品")
+    PACKAGE_COL   = col_idx.get("包名")
+    ATTR_COL      = col_idx.get("归属")
+    ONLINE_TIME_COL  = col_idx.get("上线时间")
+    OFFLINE_TIME_COL = col_idx.get("下线时间")
+
+    unmatched_pkg = []
+    unmatched_attr = []
 
     active_orders = []
     for r in data_rows:
-        status = r[STATUS_COL] if len(r) > STATUS_COL else None
-        disclose = r[DISCLOSE_COL] if len(r) > DISCLOSE_COL else None
+        def _get(col):
+            return r[col] if col is not None and len(r) > col else None
+
+        status   = _get(STATUS_COL)
+        disclose = _get(DISCLOSE_COL)
         if status == "在投" and str(disclose).strip() == "1":
-            product = str(r[PRODUCT_COL]).strip() if len(r) > PRODUCT_COL and r[PRODUCT_COL] else ""
-            pkg_val = r[PACKAGE_COL] if len(r) > PACKAGE_COL else ""
-            attr_val = r[ATTR_COL] if len(r) > ATTR_COL else ""
-            if isinstance(pkg_val, str) and pkg_val.startswith("VLOOKUP"):
-                r[PACKAGE_COL] = pkg_map.get(product, "")
-            if isinstance(attr_val, str) and attr_val.startswith("VLOOKUP"):
-                r[ATTR_COL] = attr_map.get(product, "")
-            if len(r) > ONLINE_TIME_COL:
+            product = str(r[PRODUCT_COL]).strip() if (PRODUCT_COL is not None and len(r) > PRODUCT_COL and r[PRODUCT_COL]) else ""
+            pkg_val  = _get(PACKAGE_COL)
+            attr_val = _get(ATTR_COL)
+            pkg_was_vlookup = isinstance(pkg_val, str) and pkg_val.startswith("VLOOKUP")
+            attr_was_vlookup = isinstance(attr_val, str) and attr_val.startswith("VLOOKUP")
+            if pkg_was_vlookup:
+                new_pkg = pkg_map.get(product, "")
+                if PACKAGE_COL is not None:
+                    r[PACKAGE_COL] = new_pkg
+                if not new_pkg and product and product not in unmatched_pkg:
+                    unmatched_pkg.append(product)
+            if attr_was_vlookup:
+                new_attr = attr_map.get(product, "")
+                if ATTR_COL is not None:
+                    r[ATTR_COL] = new_attr
+                if not new_attr and product and product not in unmatched_attr:
+                    unmatched_attr.append(product)
+            if ONLINE_TIME_COL is not None and len(r) > ONLINE_TIME_COL:
                 r[ONLINE_TIME_COL] = excel_serial_to_date(r[ONLINE_TIME_COL])
-            if len(r) > OFFLINE_TIME_COL:
+            if OFFLINE_TIME_COL is not None and len(r) > OFFLINE_TIME_COL:
                 r[OFFLINE_TIME_COL] = excel_serial_to_date(r[OFFLINE_TIME_COL])
             active_orders.append(r)
 
-    # 转为 DataFrame
+    # 转为 DataFrame（列顺序严格按 HEADERS，缺的列自动填空，避免实际数据少列导致后续 display_cols KeyError）
     rows_data = []
     for order in active_orders:
         row_dict = {}
         for i, header in enumerate(HEADERS):
-            row_dict[header] = order[i] if i < len(order) else ""
+            idx = col_idx.get(header, i)
+            row_dict[header] = order[idx] if idx is not None and idx < len(order) else ""
         rows_data.append(row_dict)
 
-    return pd.DataFrame(rows_data), datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    warnings = {}
+    if unmatched_pkg:
+        warnings["包名未匹配（VLOOKUP 返回空，检查匹配表）"] = unmatched_pkg
+    if unmatched_attr:
+        warnings["归属未匹配（VLOOKUP 返回空，检查匹配表）"] = unmatched_attr
+    # 表头缺失的列
+    missing_cols = [h for h in HEADERS if h not in col_idx]
+    if missing_cols:
+        warnings["飞书表头缺少这些列（已按空值填充，建议核对列顺序/列名）"] = missing_cols
+
+    fetch_meta = {"warnings": warnings, "col_idx": col_idx}
+
+    return pd.DataFrame(rows_data), datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M"), fetch_meta
 
 def main():
     # 页面配置
@@ -404,15 +444,21 @@ def main():
             demo_rows.append(row)
         df = pd.DataFrame(demo_rows)
         sync_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        fetch_meta = {"warnings": {}, "col_idx": {h: i for i, h in enumerate(HEADERS)}}
     else:
         with st.spinner("正在从飞书读取最新数据..."):
             fetch_res = fetch_active_orders()
             # 兼容旧返回值：支持 (DataFrame, time) 新格式与单 DataFrame 旧格式
             if isinstance(fetch_res, tuple):
-                df, sync_time = fetch_res
+                if len(fetch_res) >= 3:
+                    df, sync_time, fetch_meta = fetch_res
+                else:
+                    df, sync_time = fetch_res
+                    fetch_meta = {"warnings": {}, "col_idx": {h: i for i, h in enumerate(HEADERS)}}
             else:
                 df = fetch_res
                 sync_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+                fetch_meta = {"warnings": {}, "col_idx": {h: i for i, h in enumerate(HEADERS)}}
 
         if isinstance(df, pd.DataFrame) and df.empty:
             st.warning("未读取到在投订单数据")
@@ -430,6 +476,13 @@ def main():
     if not isinstance(df, pd.DataFrame):
         st.warning("数据读取失败")
         return
+
+    # 数据质量警告（包名/归属匹配失败、表头缺失列）——用户第一时间发现漏填
+    warnings = fetch_meta.get("warnings", {}) if isinstance(fetch_meta, dict) else {}
+    if warnings:
+        with st.expander("⚠️ 数据质量提示", expanded=False):
+            for title, items in warnings.items():
+                st.markdown(f"**{title}**：{len(items)} 条  \n" + "、".join(f"`{x}`" for x in items[:50]) + (" 等" if len(items) > 50 else ""))
 
     # 统计卡片（自定义彩色圆角卡片）
     products_count = df['产品'].dropna().nunique() if '产品' in df.columns else 0
@@ -457,7 +510,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # 筛选区（9 个多选筛选项 + 清除筛选按钮，同一行显示）
+    # 筛选区（9 个多选筛选 + 清除筛选，同一行显示）
     st.markdown('<div class="filter-container">', unsafe_allow_html=True)
 
     FILTER_KEYS = {
@@ -533,19 +586,70 @@ def main():
     st.markdown('</div>', unsafe_allow_html=True)
 
     # 数据表格
-    # 在投订单明细标题（带动图）
+    # 在投订单明细：icon + 标题 + 导出按钮（同一行）。无论 icon 是否加载，标题只渲染一次。
     table_b64 = load_gif_base64("table_icon.gif")
+
+    # ====== 导出：优先 Excel（xlsx，带筛选后完整列），没 openpyxl 回退到 CSV（utf-8-sig Excel 直接打开不乱码）======
+    import io
+    _export_cols = [c for c in HEADERS if c in filtered_df.columns]
+    _export_df = filtered_df[_export_cols] if not filtered_df.empty else pd.DataFrame(columns=_export_cols)
+    _file_stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M")
+    try:
+        import openpyxl  # noqa: F401
+        _buf = io.BytesIO()
+        with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+            _export_df.to_excel(_w, index=False, sheet_name="在投订单")
+        _file_bytes = _buf.getvalue()
+        _mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        _file_name = f"在投订单筛选结果_{len(_export_df)}条_{_file_stamp}.xlsx"
+    except Exception:
+        _file_bytes = _export_df.to_csv(index=False).encode("utf-8-sig")
+        _mime = "text/csv"
+        _file_name = f"在投订单筛选结果_{len(_export_df)}条_{_file_stamp}.csv"
+
+    _title_html = f"### 在投订单明细（{len(filtered_df)} 条）  \n<small style=\"color:#8a8f99;font-weight:400;\">具体测试量级需找对应中台确认</small>"
+
     if table_b64:
+        # 布局：[gif icon 1 : [ 标题 : 导出按钮 ] 25] → 标题只渲染一次
         col_img2, col_txt2 = st.columns([1, 25])
         with col_img2:
             components.html(
                 f'<img src="data:image/gif;base64,{table_b64}" style="width:35px;height:auto;">',
-                height=45
+                height=45,
             )
         with col_txt2:
-            st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）  \n<small style=\"color:#8a8f99;font-weight:400;\">具体测试量级需找对应中台确认</small>", unsafe_allow_html=True)
+            _t2, _exp = st.columns([5, 1], gap="small")
+            with _t2:
+                st.markdown(_title_html, unsafe_allow_html=True)
+            with _exp:
+                # 占位对齐标题与 label 高度差
+                st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
+                st.download_button(
+                    label="📥 导出筛选结果",
+                    data=_file_bytes,
+                    file_name=_file_name,
+                    mime=_mime,
+                    use_container_width=True,
+                    key="btn_export",
+                    disabled=len(_export_df) == 0,
+                    help="导出当前筛选结果的全部列（包含表格里隐藏的广告主/渠道号/下载链接）。没有 openpyxl 时会自动回退到 utf-8-sig 的 CSV，Excel 双击直接打开不乱码。",
+                )
     else:
-        st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）  \n<small style=\"color:#8a8f99;font-weight:400;\">具体测试量级需找对应中台确认</small>", unsafe_allow_html=True)
+        # 没有 gif：标题 + 导出按钮并排
+        _t2, _exp = st.columns([5, 1], gap="small")
+        with _t2:
+            st.markdown(_title_html, unsafe_allow_html=True)
+        with _exp:
+            st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
+            st.download_button(
+                label="📥 导出筛选结果",
+                data=_file_bytes,
+                file_name=_file_name,
+                mime=_mime,
+                use_container_width=True,
+                key="btn_export",
+                disabled=len(_export_df) == 0,
+            )
 
     # 选择要显示的列（移除不需要展示的列）
     display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '考核', '考核数值', '广告主', '渠道号', '下载链接', '是否打满', '是否披露', '其他备注']]
@@ -703,10 +807,10 @@ def main():
             st.markdown("### 数据概览")
         import altair as alt
 
-        # 图表区：按产品单独筛选（多选 + 清除，与上方 9 个全局筛选叠加生效）
+        # 图表区：产品筛选（多选 + 清除），Top N 固定为 15，不再滑条
         _all_products = sorted([str(x) for x in filtered_df['产品'].dropna().astype(str).unique()]) if '产品' in filtered_df.columns else []
-        _chart_col1, _chart_col2 = st.columns([4, 1], gap="small")
-        with _chart_col1:
+        _chart_c1, _chart_c2 = st.columns([3, 1], gap="small")
+        with _chart_c1:
             chart_product_filter = st.multiselect(
                 "🔍 图表按产品筛选（多选，空=展示全部）",
                 options=_all_products,
@@ -714,12 +818,25 @@ def main():
                 key="ms_chart_product",
                 placeholder="全部产品"
             )
-        with _chart_col2:
+        with _chart_c2:
             st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
             if st.button("清除产品筛选", use_container_width=True, key="btn_clear_chart_product"):
                 if "ms_chart_product" in st.session_state:
                     del st.session_state["ms_chart_product"]
                 st.rerun()
+
+        # Top N 固定为 15；数据少时取 min(实际可展示数, 15)
+        _n_docs = (
+            int(filtered_df["接口文档"].dropna().astype(str).nunique())
+            if (not filtered_df.empty and "接口文档" in filtered_df.columns)
+            else 0
+        )
+        _n_prod = (
+            int(filtered_df["产品"].dropna().astype(str).nunique())
+            if (not filtered_df.empty and "产品" in filtered_df.columns)
+            else 0
+        )
+        top_n = max(3, min(15, max(_n_docs, _n_prod, 3)))
 
         chart_df = filtered_df
         if chart_product_filter and '产品' in chart_df.columns:
@@ -729,28 +846,36 @@ def main():
         if chart_df.empty:
             st.info("当前筛选条件下无数据可供图表展示")
         else:
-            # 图表 1：按接口文档统计订单数（Top 15 降序，水平条形图）
+            # 图表 1：按接口文档统计订单数（Top 15，降序，水平条形图 + 数值 label）
             doc_counts = (
                 chart_df.groupby("接口文档", dropna=False)
                 .size()
                 .reset_index(name="订单数")
                 .sort_values("订单数", ascending=False)
-                .head(15)
+                .head(top_n)
+            )
+            _max_doc = int(doc_counts["订单数"].max()) if not doc_counts.empty else 0
+            base_bar = alt.Chart(doc_counts).encode(
+                x=alt.X("订单数:Q", title="订单数量", axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False),
+                        scale=alt.Scale(domain=[0, _max_doc * 1.18]) if _max_doc > 0 else alt.Undefined),
+                y=alt.Y(
+                    "接口文档:N",
+                    title=None,
+                    sort=alt.EncodingSortField(field="订单数", op="sum", order="descending"),
+                    axis=alt.Axis(domain=False, ticks=False, labelLimit=250),
+                ),
+            )
+            bar_chart = base_bar.mark_bar(color="#6C8EAD", cornerRadiusTopRight=4, cornerRadiusBottomRight=4).encode(
+                tooltip=["接口文档:N", "订单数:Q"],
+            )
+            text_chart = base_bar.mark_text(
+                align="left", baseline="middle", dx=5, fontSize=12, color="#4e5969", fontWeight=600,
+            ).encode(
+                text=alt.Text("订单数:Q", format="d"),
             )
             chart1 = (
-                alt.Chart(doc_counts)
-                .mark_bar(color="#6C8EAD", cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
-                .encode(
-                    x=alt.X("订单数:Q", title="订单数量", axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False)),
-                    y=alt.Y(
-                        "接口文档:N",
-                        title=None,
-                        sort=alt.EncodingSortField(field="订单数", op="sum", order="descending"),
-                        axis=alt.Axis(domain=False, ticks=False, labelLimit=250),
-                    ),
-                    tooltip=["接口文档:N", "订单数:Q"],
-                )
-                .properties(height=380)
+                (bar_chart + text_chart)
+                .properties(height=max(320, 34 * len(doc_counts)))
                 .configure_view(stroke=None)
                 .configure_axis(
                     labelFont="Microsoft YaHei",
@@ -764,7 +889,7 @@ def main():
                 .configure_legend(titleFont="Microsoft YaHei", labelFont="Microsoft YaHei")
             )
 
-            # 图表 2：Top 产品 × 预算源 堆叠柱状图
+            # 图表 2：Top 产品 × 预算源 堆叠柱状图（按产品总订单数 Top N + 每块标数值）
             prod_src_counts = (
                 chart_df.groupby(["产品", "预算源"], dropna=False)
                 .size()
@@ -772,9 +897,22 @@ def main():
             )
             top_products = (
                 prod_src_counts.groupby("产品")["订单数"].sum()
-                .sort_values(ascending=False).head(15).index.tolist()
+                .sort_values(ascending=False).head(top_n).index.tolist()
             )
-            prod_src_top = prod_src_counts[prod_src_counts["产品"].isin(top_products)]
+            prod_src_top = prod_src_counts[prod_src_counts["产品"].isin(top_products)].copy()
+            # 注意：传给 Altair 的所有列保持纯 pandas dtypes（object(str) / int）。
+            # 1) 严禁使用 pd.Categorical：其底层 codes 为 int，会触发 pyarrow 的
+            #    "Expected bytes, got a 'int' object" ArrowTypeError。
+            # 2) 严禁在 alt.X(sort=...) 里直接塞 Python list：Altair V6 的 sort 只接受
+            #    bool / float / Mapping（如 EncodingSortField），否则会抛 SchemaValidationError：
+            #    "'番茄免费小说' is an invalid value for `0`"。
+            # 替代方案：新增一个纯 int 的排名字段，用 EncodingSortField 引用它。
+            prod_src_top["产品"] = prod_src_top["产品"].astype(str)
+            prod_src_top["预算源"] = prod_src_top["预算源"].astype(str)
+            _prod_rank = {str(p): i for i, p in enumerate(top_products)}
+            prod_src_top["_产品排序"] = (
+                prod_src_top["产品"].map(_prod_rank).fillna(9999).astype(int)
+            )
 
             _src_domains = sorted(prod_src_top["预算源"].dropna().astype(str).unique().tolist())
             # 低饱和度商务灰莫兰迪调色板（色相差异足够 + 整体柔和不刺眼）
@@ -785,21 +923,37 @@ def main():
                 range=_src_colors[: len(_src_domains)] if len(_src_domains) <= len(_src_colors) else None,
             )
 
+            _total_max = int(prod_src_top.groupby("产品")["订单数"].sum().max()) if not prod_src_top.empty else 0
+            base2 = alt.Chart(prod_src_top).encode(
+                x=alt.X(
+                    "产品:N",
+                    title=None,
+                    sort=alt.EncodingSortField(field="_产品排序", op="min", order="ascending"),
+                    axis=alt.Axis(domain=False, ticks=False, labelAngle=-25, labelLimit=180),
+                ),
+                y=alt.Y("订单数:Q", title="订单数量",
+                        axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False),
+                        scale=alt.Scale(domain=[0, _total_max * 1.22]) if _total_max > 0 else alt.Undefined),
+                color=alt.Color("预算源:N", title="预算源", scale=color_scale, legend=alt.Legend(orient="bottom")),
+            )
+            bars2 = base2.mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                tooltip=["产品:N", "预算源:N", "订单数:Q"],
+            )
+            # 堆叠块数值：订单数 >= 2 才标，避免 1 个单位的块字重叠看不清
+            text2 = base2.mark_text(
+                align="center", baseline="middle", fontSize=11, color="#ffffff",
+                fontWeight=700, dy=-1,
+            ).encode(
+                text=alt.condition(
+                    alt.datum["订单数"] >= 2,
+                    alt.Text("订单数:Q", format="d"),
+                    alt.value(""),
+                ),
+                order=alt.Order("预算源:N", sort="ascending"),
+            )
             chart2 = (
-                alt.Chart(prod_src_top)
-                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
-                .encode(
-                    x=alt.X(
-                        "产品:N",
-                        title=None,
-                        sort=alt.EncodingSortField(field="订单数", op="sum", order="descending"),
-                        axis=alt.Axis(domain=False, ticks=False, labelAngle=-25, labelLimit=180),
-                    ),
-                    y=alt.Y("订单数:Q", title="订单数量", axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False)),
-                    color=alt.Color("预算源:N", title="预算源", scale=color_scale, legend=alt.Legend(orient="bottom")),
-                    tooltip=["产品:N", "预算源:N", "订单数:Q"],
-                )
-                .properties(height=380)
+                (bars2 + text2)
+                .properties(height=390)
                 .configure_view(stroke=None)
                 .configure_axis(
                     labelFont="Microsoft YaHei",
@@ -815,11 +969,11 @@ def main():
 
             c1, c2 = st.columns(2, gap="medium")
             with c1:
-                st.markdown("**按接口文档 · 订单数 Top 15（降序）**")
-                st.altair_chart(chart1, use_container_width=True, theme=None)
+                st.markdown(f"**按接口文档 · 订单数 Top {len(doc_counts)}（降序，共 {len(chart_df)} 条）**", unsafe_allow_html=True)
+                st.altair_chart(chart1, use_container_width=True, theme=None, key="alt_chart1")
             with c2:
-                st.markdown("**按产品 × 预算源 分布 Top 15**")
-                st.altair_chart(chart2, use_container_width=True, theme=None)
+                st.markdown(f"**按产品 × 预算源 分布 Top {len(top_products)}**", unsafe_allow_html=True)
+                st.altair_chart(chart2, use_container_width=True, theme=None, key="alt_chart2")
 
     else:
         st.info("没有符合筛选条件的订单")
