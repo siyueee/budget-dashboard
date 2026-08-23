@@ -30,8 +30,8 @@ MATCH_TOTAL_ROWS = 628
 # ===== 表头定义（与电子表格实际列顺序一致）=====
 HEADERS = ['预算源', '任务类型', '配置号', '分端', '广告主', '包名', '接口文档', '产品',
            '渠道号', '合作价格', '需求量级', '上线时间', '下线时间', '上下线状态',
-           '回传维度', '考核', '考核数值', 'RTA', '考核备注', '其他备注',
-           '下载链接', '归属', '是否打满', '是否披露']
+           '回传维度', '考核', '考核数值', 'RTA', '考核备注', '下载链接',
+           '归属', '是否打满', '是否披露', '']
 
 # ===== Token 缓存 =====
 _token_cache = {"token": None, "expire": 0}
@@ -123,21 +123,25 @@ def fetch_active_orders():
 
     data_rows = all_rows[1:]
 
-    # 构建包名匹配表
+    # 构建包名、归属匹配表（匹配表：A列=产品, B列=包名, C列=归属）
     pkg_map = {}
+    attr_map = {}
     row = 1
     while row <= match_rows:
         end = min(row + batch_size - 1, match_rows)
-        batch = read_sheet_range(MATCH_SHEET_ID, row, end, "A", "B")
+        batch = read_sheet_range(MATCH_SHEET_ID, row, end, "A", "C")
         for r in batch[1:] if row == 1 else batch:
             if len(r) >= 2 and r[0] and r[1]:
                 pkg_map[str(r[0]).strip()] = str(r[1]).strip()
+            if len(r) >= 3 and r[0] and r[2]:
+                attr_map[str(r[0]).strip()] = str(r[2]).strip()
         row = end + 1
 
     STATUS_COL = 13     # 上下线状态
-    DISCLOSE_COL = 23   # 是否披露
+    DISCLOSE_COL = 22   # 是否披露
     PRODUCT_COL = 7     # 产品
     PACKAGE_COL = 5     # 包名
+    ATTR_COL = 20       # 归属
     ONLINE_TIME_COL = 11
     OFFLINE_TIME_COL = 12
 
@@ -148,8 +152,11 @@ def fetch_active_orders():
         if status == "在投" and str(disclose).strip() == "1":
             product = str(r[PRODUCT_COL]).strip() if len(r) > PRODUCT_COL and r[PRODUCT_COL] else ""
             pkg_val = r[PACKAGE_COL] if len(r) > PACKAGE_COL else ""
+            attr_val = r[ATTR_COL] if len(r) > ATTR_COL else ""
             if isinstance(pkg_val, str) and pkg_val.startswith("VLOOKUP"):
                 r[PACKAGE_COL] = pkg_map.get(product, "")
+            if isinstance(attr_val, str) and attr_val.startswith("VLOOKUP"):
+                r[ATTR_COL] = attr_map.get(product, "")
             if len(r) > ONLINE_TIME_COL:
                 r[ONLINE_TIME_COL] = excel_serial_to_date(r[ONLINE_TIME_COL])
             if len(r) > OFFLINE_TIME_COL:
@@ -169,7 +176,7 @@ def fetch_active_orders():
 def main():
     # 页面配置
     st.set_page_config(
-        page_title="订单披露",
+        page_title="订单LIST",
         page_icon="📊",
         layout="wide"
     )
@@ -318,9 +325,9 @@ def main():
                 height=60
             )
         with col_txt:
-            st.markdown("# 订单披露")
+            st.markdown("# 订单LIST")
     else:
-        st.markdown("# 订单披露")
+        st.markdown("# 订单LIST")
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
     # 读取数据（无凭证时使用 Demo 假数据，便于预览表格样式）
@@ -337,12 +344,12 @@ def main():
                    "微博-自如fid373(ocpx)", "微博-百度网盘fid735(ocpx)", "微博-学而思网校fid752(ocpx)",
                    "喜马拉雅-七猫免费小说174", "喜马拉雅-英语天天练1481593", "微博-360文库新客下单3993",
                    "微博-百度地图fid4018", "微博-懂车帝fid4171"]
-        sources = ["媒体"]
+        sources = ["媒体", "直客", "信息流", "搜索", "官方"]
         task_types = ["拉新"]
         rtas = ["是", "无", "次留率50%", "次留率35%", "次留率45%", "下单率3.5%", "下单率5%", "16-24点,次留34%,下单5%", "下单率30%", "下单率35%"]
         callbacks = ["激活", "下单"]
         statuses = ["在投"]
-        attributions = ["快手", "百度", "nan", "官方", "自营"]
+        attributions = ["快手", "百度", "官方", "自营", "字节", "腾讯"]
         price_ranges = [(3, 10), (6.5, 12.5), (10, 20), (55, 60), (0.5, 5)]
         demands = [20, 50, 100, 150, 200, 300, 500, 1000, 1500, 2000, 3000, 5000]
 
@@ -389,11 +396,11 @@ def main():
                 elif h == '考核数值': row[h] = ""
                 elif h == 'RTA': row[h] = rta
                 elif h == '考核备注': row[h] = note
-                elif h == '其他备注': row[h] = random.choice([attributions[i % len(attributions)], "", "nan"])
                 elif h == '下载链接': row[h] = ""
                 elif h == '归属': row[h] = random.choice(attributions)
                 elif h == '是否打满': row[h] = ""
                 elif h == '是否披露': row[h] = "1"
+                else: row[h] = ""
             demo_rows.append(row)
         df = pd.DataFrame(demo_rows)
     else:
@@ -439,58 +446,75 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # 筛选区（9 个筛选项，同一行显示）
+    # 筛选区（9 个多选筛选项 + 清除筛选按钮，同一行显示）
     st.markdown('<div class="filter-container">', unsafe_allow_html=True)
 
-    col_a, col_b, col_c, col_d, col_e, col_f, col_g, col_h, col_i = st.columns(9)
-    with col_a:
-        config_options = ['全部'] + sorted([str(x) for x in df['配置号'].dropna().unique()]) if '配置号' in df.columns else ['全部']
-        config_filter = st.selectbox("配置号", config_options)
-    with col_b:
-        api_doc_options = ['全部'] + sorted([str(x) for x in df['接口文档'].dropna().unique()]) if '接口文档' in df.columns else ['全部']
-        api_doc_filter = st.selectbox("接口文档", api_doc_options)
-    with col_c:
-        product_options = ['全部'] + sorted([str(x) for x in df['产品'].dropna().unique()]) if '产品' in df.columns else ['全部']
-        product_filter = st.selectbox("产品", product_options)
-    with col_d:
-        callback_options = ['全部'] + sorted([str(x) for x in df['回传维度'].dropna().unique()]) if '回传维度' in df.columns else ['全部']
-        callback_filter = st.selectbox("回传维度", callback_options)
-    with col_e:
-        attrib_options = ['全部'] + sorted([str(x) for x in df['归属'].dropna().unique()]) if '归属' in df.columns else ['全部']
-        attribution_filter = st.selectbox("归属", attrib_options)
-    with col_f:
-        rta_options = ['全部'] + sorted([str(x) for x in df['RTA'].dropna().unique()]) if 'RTA' in df.columns else ['全部']
-        rta_filter = st.selectbox("RTA", rta_options)
-    with col_g:
-        platform_options = ['全部'] + sorted([str(x) for x in df['分端'].dropna().unique()]) if '分端' in df.columns else ['全部']
-        platform_filter = st.selectbox("分端", platform_options)
-    with col_h:
-        source_options = ['全部'] + sorted([str(x) for x in df['预算源'].dropna().unique()]) if '预算源' in df.columns else ['全部']
-        source_filter = st.selectbox("预算源", source_options)
-    with col_i:
-        task_type_options = ['全部'] + sorted([str(x) for x in df['任务类型'].dropna().unique()]) if '任务类型' in df.columns else ['全部']
-        task_type_filter = st.selectbox("任务类型", task_type_options)
+    FILTER_KEYS = {
+        '配置号':   'ms_config',
+        '接口文档': 'ms_api_doc',
+        '产品':     'ms_product',
+        '回传维度': 'ms_callback',
+        '归属':     'ms_attrib',
+        'RTA':      'ms_rta',
+        '分端':     'ms_platform',
+        '预算源':   'ms_source',
+        '任务类型': 'ms_task',
+    }
 
-    # 应用筛选
+    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1, 0.85], gap="small")
+
+    def _options(col_name):
+        if col_name in df.columns:
+            return sorted([str(x) for x in df[col_name].dropna().astype(str).unique()])
+        return []
+
+    with cols[0]:
+        config_filter = st.multiselect("配置号",   options=_options('配置号'),   default=[], key=FILTER_KEYS['配置号'],   placeholder="全部")
+    with cols[1]:
+        api_doc_filter = st.multiselect("接口文档", options=_options('接口文档'), default=[], key=FILTER_KEYS['接口文档'], placeholder="全部")
+    with cols[2]:
+        product_filter = st.multiselect("产品",     options=_options('产品'),     default=[], key=FILTER_KEYS['产品'],     placeholder="全部")
+    with cols[3]:
+        callback_filter = st.multiselect("回传维度", options=_options('回传维度'), default=[], key=FILTER_KEYS['回传维度'], placeholder="全部")
+    with cols[4]:
+        attribution_filter = st.multiselect("归属", options=_options('归属'),     default=[], key=FILTER_KEYS['归属'],     placeholder="全部")
+    with cols[5]:
+        rta_filter = st.multiselect("RTA",          options=_options('RTA'),      default=[], key=FILTER_KEYS['RTA'],      placeholder="全部")
+    with cols[6]:
+        platform_filter = st.multiselect("分端",    options=_options('分端'),     default=[], key=FILTER_KEYS['分端'],     placeholder="全部")
+    with cols[7]:
+        source_filter = st.multiselect("预算源",    options=_options('预算源'),   default=[], key=FILTER_KEYS['预算源'],   placeholder="全部")
+    with cols[8]:
+        task_type_filter = st.multiselect("任务类型", options=_options('任务类型'), default=[], key=FILTER_KEYS['任务类型'], placeholder="全部")
+    with cols[9]:
+        # 占位对齐筛选器 label 高度
+        st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
+        if st.button("🗑 清除筛选", use_container_width=True, key="btn_clear_filters"):
+            for _k in FILTER_KEYS.values():
+                if _k in st.session_state:
+                    del st.session_state[_k]
+            st.rerun()
+
+    # 应用筛选（多选：空列表=全部；有值时 isin）
     filtered_df = df.copy()
-    if config_filter != '全部':
-        filtered_df = filtered_df[filtered_df['配置号'].astype(str) == config_filter]
-    if product_filter != '全部':
-        filtered_df = filtered_df[filtered_df['产品'].astype(str) == product_filter]
-    if api_doc_filter != '全部':
-        filtered_df = filtered_df[filtered_df['接口文档'].astype(str) == api_doc_filter]
-    if attribution_filter != '全部':
-        filtered_df = filtered_df[filtered_df['归属'].astype(str) == attribution_filter]
-    if rta_filter != '全部':
-        filtered_df = filtered_df[filtered_df['RTA'].astype(str) == rta_filter]
-    if callback_filter != '全部':
-        filtered_df = filtered_df[filtered_df['回传维度'].astype(str) == callback_filter]
-    if platform_filter != '全部':
-        filtered_df = filtered_df[filtered_df['分端'].astype(str) == platform_filter]
-    if source_filter != '全部':
-        filtered_df = filtered_df[filtered_df['预算源'].astype(str) == source_filter]
-    if task_type_filter != '全部':
-        filtered_df = filtered_df[filtered_df['任务类型'].astype(str) == task_type_filter]
+    if config_filter:
+        filtered_df = filtered_df[filtered_df['配置号'].astype(str).isin(config_filter)]
+    if product_filter:
+        filtered_df = filtered_df[filtered_df['产品'].astype(str).isin(product_filter)]
+    if api_doc_filter:
+        filtered_df = filtered_df[filtered_df['接口文档'].astype(str).isin(api_doc_filter)]
+    if attribution_filter:
+        filtered_df = filtered_df[filtered_df['归属'].astype(str).isin(attribution_filter)]
+    if rta_filter:
+        filtered_df = filtered_df[filtered_df['RTA'].astype(str).isin(rta_filter)]
+    if callback_filter:
+        filtered_df = filtered_df[filtered_df['回传维度'].astype(str).isin(callback_filter)]
+    if platform_filter:
+        filtered_df = filtered_df[filtered_df['分端'].astype(str).isin(platform_filter)]
+    if source_filter:
+        filtered_df = filtered_df[filtered_df['预算源'].astype(str).isin(source_filter)]
+    if task_type_filter:
+        filtered_df = filtered_df[filtered_df['任务类型'].astype(str).isin(task_type_filter)]
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -505,12 +529,12 @@ def main():
                 height=45
             )
         with col_txt2:
-            st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）")
+            st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）  \n<small style=\"color:#8a8f99;font-weight:400;\">具体测试量级需找对应中台确认</small>", unsafe_allow_html=True)
     else:
-        st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）")
+        st.markdown(f"### 在投订单明细（{len(filtered_df)} 条）  \n<small style=\"color:#8a8f99;font-weight:400;\">具体测试量级需找对应中台确认</small>", unsafe_allow_html=True)
 
     # 选择要显示的列（移除不需要展示的列）
-    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '考核', '考核数值', '广告主', '渠道号', '下载链接', '是否打满', '是否披露']]
+    display_cols = [c for c in HEADERS if c not in ['上线时间', '下线时间', '考核', '考核数值', '广告主', '渠道号', '下载链接', '是否打满', '是否披露', '其他备注']]
     display_df = filtered_df[display_cols] if not filtered_df.empty else filtered_df
 
     if not display_df.empty:
@@ -526,7 +550,7 @@ def main():
 
         # 构建表体
         tbody_html = "<tbody>"
-        note_cols = {"考核备注", "其他备注"}
+        note_cols = {"考核备注"}
         price_cols = {"合作价格"}
         status_cols = {"上下线状态"}
 
@@ -652,6 +676,137 @@ def main():
             file_name=f"在投订单_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
+
+        # ===== 可视化图表 =====
+        chart_b64 = load_gif_base64("chart_icon.gif")
+        if chart_b64:
+            col_img3, col_txt3 = st.columns([1, 20])
+            with col_img3:
+                st.markdown(f'<img src="data:image/gif;base64,{chart_b64}" style="height:38px;width:38px;margin-top:4px;" alt=""/>', unsafe_allow_html=True)
+            with col_txt3:
+                st.markdown("### 数据概览")
+        else:
+            st.markdown("### 数据概览")
+        import altair as alt
+
+        # 图表区：按产品单独筛选（多选 + 清除，与上方 9 个全局筛选叠加生效）
+        _all_products = sorted([str(x) for x in filtered_df['产品'].dropna().astype(str).unique()]) if '产品' in filtered_df.columns else []
+        _chart_col1, _chart_col2 = st.columns([4, 1], gap="small")
+        with _chart_col1:
+            chart_product_filter = st.multiselect(
+                "🔍 图表按产品筛选（多选，空=展示全部）",
+                options=_all_products,
+                default=[],
+                key="ms_chart_product",
+                placeholder="全部产品"
+            )
+        with _chart_col2:
+            st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
+            if st.button("清除产品筛选", use_container_width=True, key="btn_clear_chart_product"):
+                if "ms_chart_product" in st.session_state:
+                    del st.session_state["ms_chart_product"]
+                st.rerun()
+
+        chart_df = filtered_df
+        if chart_product_filter and '产品' in chart_df.columns:
+            chart_df = chart_df[chart_df['产品'].astype(str).isin(chart_product_filter)]
+
+        # 空态保护：筛选后无数据时跳过画图
+        if chart_df.empty:
+            st.info("当前筛选条件下无数据可供图表展示")
+        else:
+            # 图表 1：按接口文档统计订单数（Top 15 降序，水平条形图）
+            doc_counts = (
+                chart_df.groupby("接口文档", dropna=False)
+                .size()
+                .reset_index(name="订单数")
+                .sort_values("订单数", ascending=False)
+                .head(15)
+            )
+            chart1 = (
+                alt.Chart(doc_counts)
+                .mark_bar(color="#6C8EAD", cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
+                .encode(
+                    x=alt.X("订单数:Q", title="订单数量", axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False)),
+                    y=alt.Y(
+                        "接口文档:N",
+                        title=None,
+                        sort=alt.EncodingSortField(field="订单数", op="sum", order="descending"),
+                        axis=alt.Axis(domain=False, ticks=False, labelLimit=250),
+                    ),
+                    tooltip=["接口文档:N", "订单数:Q"],
+                )
+                .properties(height=380)
+                .configure_view(stroke=None)
+                .configure_axis(
+                    labelFont="Microsoft YaHei",
+                    titleFont="Microsoft YaHei",
+                    labelFontSize=12,
+                    titleFontSize=13,
+                    labelColor="#4e5969",
+                    titleColor="#4e5969",
+                )
+                .configure_title(font="Microsoft YaHei")
+                .configure_legend(titleFont="Microsoft YaHei", labelFont="Microsoft YaHei")
+            )
+
+            # 图表 2：Top 产品 × 预算源 堆叠柱状图
+            prod_src_counts = (
+                chart_df.groupby(["产品", "预算源"], dropna=False)
+                .size()
+                .reset_index(name="订单数")
+            )
+            top_products = (
+                prod_src_counts.groupby("产品")["订单数"].sum()
+                .sort_values(ascending=False).head(15).index.tolist()
+            )
+            prod_src_top = prod_src_counts[prod_src_counts["产品"].isin(top_products)]
+
+            _src_domains = sorted(prod_src_top["预算源"].dropna().astype(str).unique().tolist())
+            # 低饱和度商务灰莫兰迪调色板（色相差异足够 + 整体柔和不刺眼）
+            _src_colors = ["#6C8EAD", "#88A880", "#C68867", "#B5A26A", "#8F94A3", "#9F8AAB", "#B57279", "#6FA29A",
+                           "#C48BA1", "#A89060", "#7FB3A2", "#B29EB8"]
+            color_scale = alt.Scale(
+                domain=_src_domains,
+                range=_src_colors[: len(_src_domains)] if len(_src_domains) <= len(_src_colors) else None,
+            )
+
+            chart2 = (
+                alt.Chart(prod_src_top)
+                .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+                .encode(
+                    x=alt.X(
+                        "产品:N",
+                        title=None,
+                        sort=alt.EncodingSortField(field="订单数", op="sum", order="descending"),
+                        axis=alt.Axis(domain=False, ticks=False, labelAngle=-25, labelLimit=180),
+                    ),
+                    y=alt.Y("订单数:Q", title="订单数量", axis=alt.Axis(grid=True, gridColor="#f2f3f5", domain=False, ticks=False)),
+                    color=alt.Color("预算源:N", title="预算源", scale=color_scale, legend=alt.Legend(orient="bottom")),
+                    tooltip=["产品:N", "预算源:N", "订单数:Q"],
+                )
+                .properties(height=380)
+                .configure_view(stroke=None)
+                .configure_axis(
+                    labelFont="Microsoft YaHei",
+                    titleFont="Microsoft YaHei",
+                    labelFontSize=12,
+                    titleFontSize=13,
+                    labelColor="#4e5969",
+                    titleColor="#4e5969",
+                )
+                .configure_title(font="Microsoft YaHei")
+                .configure_legend(titleFont="Microsoft YaHei", labelFont="Microsoft YaHei")
+            )
+
+            c1, c2 = st.columns(2, gap="medium")
+            with c1:
+                st.markdown("**按接口文档 · 订单数 Top 15（降序）**")
+                st.altair_chart(chart1, use_container_width=True, theme=None)
+            with c2:
+                st.markdown("**按产品 × 预算源 分布 Top 15**")
+                st.altair_chart(chart2, use_container_width=True, theme=None)
+
     else:
         st.info("没有符合筛选条件的订单")
 
