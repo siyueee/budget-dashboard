@@ -323,28 +323,95 @@ def main():
         st.markdown("# 订单披露")
     st.caption("数据来源：飞书电子表格「订单明细」| 仅展示「在投」状态订单")
 
-    # 检查凭证
+    # 读取数据（无凭证时使用 Demo 假数据，便于预览表格样式）
     if not APP_ID or not APP_SECRET:
-        st.error("⚠️ 未配置飞书应用凭证！请在 `.streamlit/secrets.toml` 中设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
+        st.info("ℹ️ 未配置飞书凭证，当前使用 Demo 假数据预览界面样式。配置凭证后将自动读取真实数据。")
         st.code('FEISHU_APP_ID = "your_app_id"\nFEISHU_APP_SECRET = "your_app_secret"', language="toml")
-        return
+        # 生成 Demo 假数据
+        import random
+        random.seed(42)
+        demo_rows = []
+        products = ["猿辅导", "快手", "快手极速版", "自如", "百度网盘", "学而思网校", "七猫免费小说", "英语天天练", "360文库", "百度地图", "懂车帝"]
+        platforms = ["安卓", "iOS", "安卓&iOS"]
+        configs = ["微博-猿辅导fid2232", "微博-快手拉新-已卸载组合-fid3537", "微博-快手极速版拉新-已卸载-fid3538",
+                   "微博-自如fid373(ocpx)", "微博-百度网盘fid735(ocpx)", "微博-学而思网校fid752(ocpx)",
+                   "喜马拉雅-七猫免费小说174", "喜马拉雅-英语天天练1481593", "微博-360文库新客下单3993",
+                   "微博-百度地图fid4018", "微博-懂车帝fid4171"]
+        sources = ["媒体"]
+        task_types = ["拉新"]
+        rtas = ["是", "无", "次留率50%", "次留率35%", "次留率45%", "下单率3.5%", "下单率5%", "16-24点,次留34%,下单5%", "下单率30%", "下单率35%"]
+        callbacks = ["激活", "下单"]
+        statuses = ["在投"]
+        attributions = ["快手", "百度", "nan", "官方", "自营"]
+        price_ranges = [(3, 10), (6.5, 12.5), (10, 20), (55, 60), (0.5, 5)]
+        demands = [20, 50, 100, 150, 200, 300, 500, 1000, 1500, 2000, 3000, 5000]
 
-    # 读取数据
-    with st.spinner("正在从飞书读取最新数据..."):
-        df = fetch_active_orders()
+        for i in range(120):
+            product = random.choice(products)
+            pkg = f"com.{product.lower().replace('&','').replace(' ','')}.browser" if product in ["猿辅导","百度网盘"] else \
+                  f"com.smile.gifmaker" if product == "快手" else \
+                  f"com.kuaishou.nebula" if product == "快手极速版" else \
+                  f"com.ziroom.android" if product == "自如" else \
+                  f"com.xueersi.online" if product == "学而思网校" else \
+                  f"com.qimao.reader" if product == "七猫免费小说" else \
+                  f"com.english.daily.practice" if product == "英语天天练" else \
+                  f"com.qihoo.pluginbox.wenku" if product == "360文库" else \
+                  f"com.baidu.BaiduMap" if product == "百度地图" else \
+                  f"com.ss.android.auto" if product == "懂车帝" else f"com.example.app{i}"
+            price_range = random.choice(price_ranges)
+            price = round(random.uniform(*price_range), 1)
+            demand = random.choice(demands)
+            platform = random.choice(platforms)
+            callback = random.choice(callbacks)
+            rta = random.choice(rtas) if callback == "激活" else random.choice(["nan", "无"])
+            note = "定向女性，25-50岁；导课率50%（进入APP点击免费领课）" if product == "学而思网校" else \
+                   "付费率25%（注册后会有弹窗，0元领取）" if product == "猿辅导" else \
+                   "次留率50%" if rta == "次留率50%" else \
+                   "" if rta in ["nan","无"] else rta
+            row = {}
+            for h in HEADERS:
+                if h == '预算源': row[h] = random.choice(sources)
+                elif h == '任务类型': row[h] = random.choice(task_types)
+                elif h == '配置号': row[h] = random.choice(configs)
+                elif h == '分端': row[h] = platform
+                elif h == '广告主': row[h] = random.choice(["甲方A","甲方B","甲方C",""])
+                elif h == '包名': row[h] = pkg
+                elif h == '接口文档': row[h] = product
+                elif h == '产品': row[h] = product
+                elif h == '渠道号': row[h] = f"ch_{i+1:04d}"
+                elif h == '合作价格': row[h] = price
+                elif h == '需求量级': row[h] = demand
+                elif h == '上线时间': row[h] = ""
+                elif h == '下线时间': row[h] = ""
+                elif h == '上下线状态': row[h] = random.choice(statuses)
+                elif h == '回传维度': row[h] = callback
+                elif h == '考核': row[h] = ""
+                elif h == '考核数值': row[h] = ""
+                elif h == 'RTA': row[h] = rta
+                elif h == '考核备注': row[h] = note
+                elif h == '其他备注': row[h] = random.choice([attributions[i % len(attributions)], "", "nan"])
+                elif h == '下载链接': row[h] = ""
+                elif h == '归属': row[h] = random.choice(attributions)
+                elif h == '是否打满': row[h] = ""
+                elif h == '是否披露': row[h] = "1"
+            demo_rows.append(row)
+        df = pd.DataFrame(demo_rows)
+    else:
+        with st.spinner("正在从飞书读取最新数据..."):
+            df = fetch_active_orders()
 
-    if df.empty:
-        st.warning("未读取到在投订单数据")
-        # 调试信息
-        with st.expander("查看调试信息"):
-            token = get_tenant_access_token()
-            st.write(f"APP_ID: {APP_ID[:10]}..." if APP_ID else "APP_ID: 未设置")
-            st.write(f"Token 获取: {'成功' if token else '失败'}")
-            if token:
-                test_data = feishu_get(f"/sheets/v2/spreadsheets/{SPREADSHEET_TOKEN}/values/{SHEET_ID}!A1:X2",
-                                       params={"valueRenderOption": "ToString"})
-                st.write(f"API 测试: {test_data}")
-        return
+        if df.empty:
+            st.warning("未读取到在投订单数据")
+            # 调试信息
+            with st.expander("查看调试信息"):
+                token = get_tenant_access_token()
+                st.write(f"APP_ID: {APP_ID[:10]}..." if APP_ID else "APP_ID: 未设置")
+                st.write(f"Token 获取: {'成功' if token else '失败'}")
+                if token:
+                    test_data = feishu_get(f"/sheets/v2/spreadsheets/{SPREADSHEET_TOKEN}/values/{SHEET_ID}!A1:X2",
+                                           params={"valueRenderOption": "ToString"})
+                    st.write(f"API 测试: {test_data}")
+            return
 
     # 统计卡片（自定义彩色圆角卡片）
     products_count = df['产品'].dropna().nunique() if '产品' in df.columns else 0
@@ -496,8 +563,79 @@ def main():
         table_html = f'<table class="order-table">{thead_html}{tbody_html}</table>'
 
         # 用 components.html 渲染表格，设置足够高度以滚动
+        # 注意：components.html 在独立 iframe 中运行，必须把 CSS 样式直接内嵌进去
         components.html(
             f"""
+            <style>
+            /* ===== 自定义订单表格（仅横线，无竖线）===== */
+            * {{ box-sizing: border-box; }}
+            body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }}
+            .order-table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 13.5px;
+                color: #1d2129;
+                background-color: #ffffff;
+            }}
+            .order-table thead th {{
+                background-color: #ffffff;
+                font-weight: 600;
+                color: #4e5969;
+                padding: 10px 12px;
+                text-align: left;
+                /* 仅保留底部横线（表头） */
+                border: none;
+                border-bottom: 1.5px solid #c9cdd4;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+                /* 文字平铺不换行 */
+                white-space: nowrap;
+            }}
+            .order-table tbody td {{
+                padding: 10px 12px;
+                /* 仅保留底部横线（表体），去掉左右竖线 */
+                border: none;
+                border-bottom: 1px solid #e5e6eb;
+                vertical-align: middle;
+                /* 文字平铺不换行 */
+                white-space: nowrap;
+            }}
+            .order-table tbody tr:last-child td {{
+                border-bottom: none;
+            }}
+            .order-table tbody tr:hover td {{
+                background-color: #f7f8fa;
+            }}
+            /* 状态胶囊 */
+            .status-tag-active {{
+                display: inline-block;
+                padding: 2px 10px;
+                border-radius: 12px;
+                background-color: #e8ffea;
+                color: #00b578;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            /* 合作价格（高亮色） */
+            .price-cell {{
+                color: #ff7d00;
+                font-weight: 600;
+            }}
+            /* 备注列溢出省略 */
+            .note-cell {{
+                max-width: 220px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                display: inline-block;
+                width: 100%;
+            }}
+            .note-cell:hover {{
+                white-space: normal;
+                overflow: visible;
+            }}
+            </style>
             <div style="max-height:800px;overflow-y:auto;padding-right:8px;">
                 {table_html}
             </div>

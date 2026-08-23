@@ -16,6 +16,9 @@ base_payload.json
 .vscode/
 .idea/
 
+# 本地依赖（pip --target 安装目录）
+.deps/
+
 # OS
 Thumbs.db
 Desktop.ini
