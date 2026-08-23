@@ -8,7 +8,7 @@ import json
 import time
 import base64
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import streamlit.components.v1 as components
 
@@ -171,7 +171,7 @@ def fetch_active_orders():
             row_dict[header] = order[i] if i < len(order) else ""
         rows_data.append(row_dict)
 
-    return pd.DataFrame(rows_data)
+    return pd.DataFrame(rows_data), datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
 
 def main():
     # 页面配置
@@ -403,11 +403,18 @@ def main():
                 else: row[h] = ""
             demo_rows.append(row)
         df = pd.DataFrame(demo_rows)
+        sync_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     else:
         with st.spinner("正在从飞书读取最新数据..."):
-            df = fetch_active_orders()
+            fetch_res = fetch_active_orders()
+            # 兼容旧返回值：支持 (DataFrame, time) 新格式与单 DataFrame 旧格式
+            if isinstance(fetch_res, tuple):
+                df, sync_time = fetch_res
+            else:
+                df = fetch_res
+                sync_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
 
-        if df.empty:
+        if isinstance(df, pd.DataFrame) and df.empty:
             st.warning("未读取到在投订单数据")
             # 调试信息
             with st.expander("查看调试信息"):
@@ -420,10 +427,14 @@ def main():
                     st.write(f"API 测试: {test_data}")
             return
 
+    if not isinstance(df, pd.DataFrame):
+        st.warning("数据读取失败")
+        return
+
     # 统计卡片（自定义彩色圆角卡片）
     products_count = df['产品'].dropna().nunique() if '产品' in df.columns else 0
     advertisers_count = df['广告主'].dropna().nunique() if '广告主' in df.columns else 0
-    update_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    update_time = sync_time
 
     st.markdown(f"""
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
@@ -440,7 +451,7 @@ def main():
             <div class="stat-value-orange">{advertisers_count}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">更新时间</div>
+            <div class="stat-label">飞书同步时间<small style="color:#8a8f99;font-weight:400;margin-left:4px;">(北京时间)</small></div>
             <div class="stat-value-gray" style="font-size:22px;">{update_time}</div>
         </div>
     </div>
