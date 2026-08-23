@@ -463,29 +463,46 @@ def main():
 
     cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1, 0.85], gap="small")
 
-    def _options(col_name):
-        if col_name in df.columns:
-            return sorted([str(x) for x in df[col_name].dropna().astype(str).unique()])
-        return []
+    FILTER_COL_ORDER = ['配置号', '接口文档', '产品', '回传维度', '归属', 'RTA', '分端', '预算源', '任务类型']
 
-    with cols[0]:
-        config_filter = st.multiselect("配置号",   options=_options('配置号'),   default=[], key=FILTER_KEYS['配置号'],   placeholder="全部")
-    with cols[1]:
-        api_doc_filter = st.multiselect("接口文档", options=_options('接口文档'), default=[], key=FILTER_KEYS['接口文档'], placeholder="全部")
-    with cols[2]:
-        product_filter = st.multiselect("产品",     options=_options('产品'),     default=[], key=FILTER_KEYS['产品'],     placeholder="全部")
-    with cols[3]:
-        callback_filter = st.multiselect("回传维度", options=_options('回传维度'), default=[], key=FILTER_KEYS['回传维度'], placeholder="全部")
-    with cols[4]:
-        attribution_filter = st.multiselect("归属", options=_options('归属'),     default=[], key=FILTER_KEYS['归属'],     placeholder="全部")
-    with cols[5]:
-        rta_filter = st.multiselect("RTA",          options=_options('RTA'),      default=[], key=FILTER_KEYS['RTA'],      placeholder="全部")
-    with cols[6]:
-        platform_filter = st.multiselect("分端",    options=_options('分端'),     default=[], key=FILTER_KEYS['分端'],     placeholder="全部")
-    with cols[7]:
-        source_filter = st.multiselect("预算源",    options=_options('预算源'),   default=[], key=FILTER_KEYS['预算源'],   placeholder="全部")
-    with cols[8]:
-        task_type_filter = st.multiselect("任务类型", options=_options('任务类型'), default=[], key=FILTER_KEYS['任务类型'], placeholder="全部")
+    def get_cascaded_options(target_col):
+        """级联：目标列的可选项 = 原始 df 先应用「其他 8 个已选筛选」后的唯一值"""
+        if target_col not in df.columns:
+            return []
+        cascaded = df
+        for col in FILTER_COL_ORDER:
+            if col == target_col:
+                continue
+            key = FILTER_KEYS.get(col)
+            if not key:
+                continue
+            vals = st.session_state.get(key, [])
+            if vals and col in cascaded.columns:
+                cascaded = cascaded[cascaded[col].astype(str).isin(vals)]
+                if cascaded.empty:
+                    break
+        return sorted([str(x) for x in cascaded[target_col].dropna().astype(str).unique()])
+
+    for i, col_name in enumerate(FILTER_COL_ORDER):
+        with cols[i]:
+            key = FILTER_KEYS[col_name]
+            opts = get_cascaded_options(col_name)
+            # 若之前已选的值在新 options 中不存在（被级联排除了）→ 裁剪并自动重跑，避免 warning
+            cur = st.session_state.get(key, [])
+            if isinstance(cur, list):
+                cleaned = [v for v in cur if v in opts]
+            else:
+                cleaned = []
+            if cleaned != cur:
+                st.session_state[key] = cleaned
+                st.rerun()
+            st.multiselect(
+                col_name,
+                options=opts,
+                default=cleaned,
+                key=key,
+                placeholder="全部"
+            )
     with cols[9]:
         # 占位对齐筛选器 label 高度
         st.markdown("<div style='height:29px'></div>", unsafe_allow_html=True)
@@ -495,26 +512,12 @@ def main():
                     del st.session_state[_k]
             st.rerun()
 
-    # 应用筛选（多选：空列表=全部；有值时 isin）
+    # 应用筛选（多选：空列表=全部；有值时 isin）——统一从 session_state 取，与级联渲染解耦
     filtered_df = df.copy()
-    if config_filter:
-        filtered_df = filtered_df[filtered_df['配置号'].astype(str).isin(config_filter)]
-    if product_filter:
-        filtered_df = filtered_df[filtered_df['产品'].astype(str).isin(product_filter)]
-    if api_doc_filter:
-        filtered_df = filtered_df[filtered_df['接口文档'].astype(str).isin(api_doc_filter)]
-    if attribution_filter:
-        filtered_df = filtered_df[filtered_df['归属'].astype(str).isin(attribution_filter)]
-    if rta_filter:
-        filtered_df = filtered_df[filtered_df['RTA'].astype(str).isin(rta_filter)]
-    if callback_filter:
-        filtered_df = filtered_df[filtered_df['回传维度'].astype(str).isin(callback_filter)]
-    if platform_filter:
-        filtered_df = filtered_df[filtered_df['分端'].astype(str).isin(platform_filter)]
-    if source_filter:
-        filtered_df = filtered_df[filtered_df['预算源'].astype(str).isin(source_filter)]
-    if task_type_filter:
-        filtered_df = filtered_df[filtered_df['任务类型'].astype(str).isin(task_type_filter)]
+    for col_name, key in FILTER_KEYS.items():
+        vals = st.session_state.get(key, [])
+        if vals and col_name in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df[col_name].astype(str).isin(vals)]
 
     st.markdown('</div>', unsafe_allow_html=True)
 
